@@ -1,12 +1,23 @@
 import streamlit as st
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+
+try:
+    import pandas as pd
+    import plotly.express as px
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+    import numpy as np
+except ImportError as e:
+    st.error(
+        f"❌ Missing dependency: **{e}**\n\n"
+        "Make sure your `requirements.txt` is in the **same folder** as `app.py` and contains:\n"
+        "```\nstreamlit==1.35.0\npandas==2.2.2\nplotly==5.22.0\nnumpy==1.26.4\nwatchdog==4.0.1\n```\n\n"
+        "On Streamlit Cloud → **Manage App → Reboot app** after committing the requirements file."
+    )
+    st.stop()
+
 import json
 import os
 from datetime import datetime, date
-import numpy as np
 
 # ─── PAGE CONFIG ──────────────────────────────────────────────────────────────
 st.set_page_config(
