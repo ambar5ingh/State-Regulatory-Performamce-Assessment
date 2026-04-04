@@ -1,13 +1,11 @@
 import streamlit as st
 import pandas as pd
-import matplotlib
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches  # ← FIXED: was missing, caused NameError in chart_rankings
 import numpy as np
 import json
 import os
 from datetime import datetime, date
-import io
+import plotly.graph_objects as go
+import plotly.express as px
 
 # ─── PAGE CONFIG ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -162,8 +160,7 @@ def build_df(scores):
     df.index += 1
     return df
 
-def parse_excel_csv(file) -> dict | None:
-    """Accept CSV or Excel (if openpyxl available), return scores dict."""
+def parse_excel_csv(file):
     try:
         name = file.name.lower()
         if name.endswith(".csv"):
@@ -209,209 +206,182 @@ def make_csv_template():
              "Regulatory Governance": b["rg"]} for st, b in BASELINE.items()]
     return pd.DataFrame(rows).to_csv(index=False).encode()
 
-# ─── MATPLOTLIB CHARTS ────────────────────────────────────────────────────────
-plt.rcParams.update({"font.family": "DejaVu Sans", "axes.spines.top": False,
-                     "axes.spines.right": False, "figure.facecolor": "white"})
+# ─── PLOTLY CHARTS ────────────────────────────────────────────────────────────
+PLOTLY_LAYOUT = dict(
+    paper_bgcolor="white", plot_bgcolor="white",
+    font=dict(family="DM Sans, sans-serif", size=12),
+    margin=dict(l=10, r=10, t=40, b=10),
+)
 
 def chart_rankings(df_sorted):
-    n = len(df_sorted)
-    fig, ax = plt.subplots(figsize=(10, max(6, n * 0.32)))
     colors = [GRADE_COLOR[g] for g in df_sorted["Grade"]]
-    bars = ax.barh(range(n), df_sorted["Total"], color=colors, height=0.65, zorder=2)
-    ax.set_yticks(range(n))
-    ax.set_yticklabels(df_sorted["State/UT"], fontsize=8.5)
-    ax.set_xlim(0, 110)
-    ax.set_xlabel("Score (out of 100)")
-    ax.set_title("All States & UTs — Performance Ranking", fontweight="bold", pad=12)
-    ax.invert_yaxis()
-    ax.axvline(85, color=GRADE_COLOR["A"], linestyle="--", linewidth=0.8, alpha=0.6)
-    ax.axvline(65, color=GRADE_COLOR["B"], linestyle="--", linewidth=0.8, alpha=0.6)
-    ax.axvline(50, color=GRADE_COLOR["C"], linestyle="--", linewidth=0.8, alpha=0.6)
-    ax.axvline(35, color=GRADE_COLOR["D"], linestyle="--", linewidth=0.8, alpha=0.6)
-    for i, (bar, val) in enumerate(zip(bars, df_sorted["Total"])):
-        ax.text(val + 1, i, f"{val:.1f}", va="center", fontsize=7.5, color="#333")
-    legend = [mpatches.Patch(color=GRADE_COLOR[g], label=f"Grade {g}") for g in "ABCDE"]
-    ax.legend(handles=legend, loc="lower right", fontsize=8, framealpha=0.8)
-    ax.grid(axis="x", color="#f0f0f0", zorder=0)
-    fig.tight_layout()
+    fig = go.Figure(go.Bar(
+        x=df_sorted["Total"], y=df_sorted["State/UT"],
+        orientation="h", marker_color=colors,
+        text=[f"{v:.1f}" for v in df_sorted["Total"]],
+        textposition="outside",
+        hovertemplate="<b>%{y}</b><br>Score: %{x}<extra></extra>",
+    ))
+    for threshold, color in [(85, GRADE_COLOR["A"]), (65, GRADE_COLOR["B"]),
+                              (50, GRADE_COLOR["C"]), (35, GRADE_COLOR["D"])]:
+        fig.add_vline(x=threshold, line_dash="dash", line_color=color, opacity=0.5)
+    fig.update_layout(**PLOTLY_LAYOUT,
+        title="All States & UTs — Performance Ranking",
+        xaxis=dict(range=[0, 115], title="Score (out of 100)"),
+        yaxis=dict(autorange="reversed"),
+        height=max(500, len(df_sorted) * 22),
+    )
     return fig
 
 def chart_grade_donut(gc):
-    fig, ax = plt.subplots(figsize=(4, 4))
-    labels = [f"Grade {g}" for g in gc.index]
-    colors = [GRADE_BG[g] for g in gc.index]
-    wedges, texts, autotexts = ax.pie(
-        gc.values, labels=labels, colors=colors, autopct="%d", startangle=90,
-        wedgeprops=dict(width=0.5, edgecolor="white", linewidth=2),
-        textprops={"fontsize": 9},
-    )
-    for at, g in zip(autotexts, gc.index):
-        at.set_color(GRADE_COLOR[g]); at.set_fontweight("bold")
-    ax.set_title("Grade Distribution", fontweight="bold")
-    fig.tight_layout()
+    grades = list(gc.index)
+    fig = go.Figure(go.Pie(
+        labels=[f"Grade {g}" for g in grades], values=gc.values, hole=0.5,
+        marker=dict(colors=[GRADE_BG[g] for g in grades],
+                    line=dict(color=[GRADE_COLOR[g] for g in grades], width=2)),
+        textinfo="label+value",
+        hovertemplate="<b>%{label}</b><br>Count: %{value}<extra></extra>",
+    ))
+    fig.update_layout(**PLOTLY_LAYOUT, title="Grade Distribution", height=350)
     return fig
 
 def chart_region_bar(df):
-    rdf = df.groupby("Region")["Total"].mean().sort_values(ascending=False)
-    fig, ax = plt.subplots(figsize=(5, 3.5))
-    norm = plt.Normalize(rdf.min(), rdf.max())
-    colors = [plt.cm.RdYlGn(norm(v)) for v in rdf.values]
-    bars = ax.bar(rdf.index, rdf.values, color=colors, edgecolor="white", linewidth=1.5)
-    for bar, val in zip(bars, rdf.values):
-        ax.text(bar.get_x() + bar.get_width()/2, val + 0.5, f"{val:.1f}",
-                ha="center", va="bottom", fontsize=8, fontweight="bold")
-    ax.set_title("Avg Score by Region", fontweight="bold")
-    ax.set_ylabel("Average Score")
-    ax.set_ylim(0, 105)
-    plt.xticks(rotation=30, ha="right", fontsize=8)
-    ax.grid(axis="y", color="#f0f0f0")
-    fig.tight_layout()
+    rdf = df.groupby("Region")["Total"].mean().sort_values(ascending=False).reset_index()
+    fig = px.bar(rdf, x="Region", y="Total", text=rdf["Total"].round(1),
+                 color="Total", color_continuous_scale="RdYlGn",
+                 range_color=[0, 100], title="Avg Score by Region")
+    fig.update_traces(textposition="outside")
+    fig.update_layout(**PLOTLY_LAYOUT, height=350,
+                      yaxis=dict(range=[0, 110], title="Average Score"),
+                      coloraxis_showscale=False)
     return fig
 
 def chart_heatmap(df):
-    heat = df.set_index("State/UT")[["Res. Adequacy","Fin. Viability","Ease of Living","Energy Transition","Reg. Governance"]].copy()
-    for col, mx in zip(heat.columns, [32,25,23,15,5]):
-        heat[col] = (heat[col]/mx*100).round(1)
-    fig, ax = plt.subplots(figsize=(9, max(8, len(heat)*0.28)))
-    im = ax.imshow(heat.values, cmap="RdYlGn", aspect="auto", vmin=0, vmax=100)
-    ax.set_xticks(range(len(heat.columns)))
-    ax.set_xticklabels(["Res.\nAdequacy","Fin.\nViability","Ease of\nLiving","Energy\nTransition","Reg.\nGovernance"], fontsize=8)
-    ax.set_yticks(range(len(heat)))
-    ax.set_yticklabels(heat.index, fontsize=7.5)
-    for i in range(len(heat)):
-        for j in range(len(heat.columns)):
-            val = heat.values[i, j]
-            ax.text(j, i, f"{val:.0f}%", ha="center", va="center",
-                    fontsize=6.5, color="black" if 30 < val < 80 else "white")
-    plt.colorbar(im, ax=ax, label="% of Max Marks", shrink=0.6)
-    ax.set_title("Parameter Achievement Heatmap (% of Max Marks)", fontweight="bold", pad=12)
-    fig.tight_layout()
+    heat = df.set_index("State/UT")[["Res. Adequacy","Fin. Viability","Ease of Living",
+                                      "Energy Transition","Reg. Governance"]].copy()
+    for col, mx in zip(heat.columns, [32, 25, 23, 15, 5]):
+        heat[col] = (heat[col] / mx * 100).round(1)
+    fig = go.Figure(go.Heatmap(
+        z=heat.values,
+        x=["Res. Adequacy","Fin. Viability","Ease of Living","Energy Transition","Reg. Governance"],
+        y=heat.index.tolist(),
+        colorscale="RdYlGn", zmin=0, zmax=100,
+        text=[[f"{v:.0f}%" for v in row] for row in heat.values],
+        texttemplate="%{text}",
+        hovertemplate="<b>%{y}</b><br>%{x}: %{text}<extra></extra>",
+        colorbar=dict(title="% of Max"),
+    ))
+    fig.update_layout(**PLOTLY_LAYOUT,
+        title="Parameter Achievement Heatmap (% of Max Marks)",
+        yaxis=dict(autorange="reversed"),
+        height=max(600, len(heat) * 20),
+    )
     return fig
 
 def chart_radar(state_name, vals, maxes, color="#1a3a7c"):
-    labels = ["Resource\nAdequacy","Financial\nViability","Ease of\nLiving","Energy\nTransition","Regulatory\nGovernance"]
-    pcts = [v/m*100 for v,m in zip(vals,maxes)]
-    N = len(labels)
-    angles = [n/N*2*np.pi for n in range(N)] + [0]
-    pcts_c = pcts + [pcts[0]]
-    fig, ax = plt.subplots(figsize=(4, 4), subplot_kw=dict(polar=True))
-    ax.plot(angles, pcts_c, color=color, linewidth=2)
-    ax.fill(angles, pcts_c, color=color, alpha=0.15)
-    ax.set_xticks(angles[:-1])
-    ax.set_xticklabels(labels, fontsize=7.5)
-    ax.set_ylim(0, 100)
-    ax.set_yticks([25, 50, 75, 100])
-    ax.set_yticklabels(["25%","50%","75%","100%"], fontsize=6)
-    ax.set_title(state_name, fontweight="bold", pad=15, fontsize=10)
-    ax.grid(color="#e0e0e0")
-    fig.tight_layout()
+    labels = ["Resource Adequacy","Financial Viability","Ease of Living",
+              "Energy Transition","Regulatory Governance"]
+    pcts = [v / m * 100 for v, m in zip(vals, maxes)]
+    fig = go.Figure(go.Scatterpolar(
+        r=pcts + [pcts[0]], theta=labels + [labels[0]],
+        fill="toself", fillcolor=color, opacity=0.4,
+        line=dict(color=color, width=2), name=state_name,
+        hovertemplate="<b>%{theta}</b><br>%{r:.1f}%<extra></extra>",
+    ))
+    fig.update_layout(**PLOTLY_LAYOUT,
+        polar=dict(radialaxis=dict(range=[0, 100], tickvals=[25,50,75,100])),
+        title=state_name, height=380,
+    )
     return fig
 
 def chart_compare_radar(sa_name, va, sb_name, vb):
-    keys   = ["ra","fv","el","et","rg"]
-    maxes  = [32,25,23,15,5]
-    labels = ["Resource\nAdequacy","Financial\nViability","Ease of\nLiving","Energy\nTransition","Regulatory\nGovernance"]
-    pa = [va[k]/m*100 for k,m in zip(keys,maxes)]
-    pb = [vb[k]/m*100 for k,m in zip(keys,maxes)]
-    N = len(labels)
-    angles = [n/N*2*np.pi for n in range(N)] + [0]
-    fig, ax = plt.subplots(figsize=(5, 4.5), subplot_kw=dict(polar=True))
-    for pcts, name, color in [(pa, sa_name, "#1a3a7c"), (pb, sb_name, "#c62828")]:
-        pcts_c = pcts + [pcts[0]]
-        ax.plot(angles, pcts_c, color=color, linewidth=2, label=name)
-        ax.fill(angles, pcts_c, color=color, alpha=0.1)
-    ax.set_xticks(angles[:-1])
-    ax.set_xticklabels(labels, fontsize=7.5)
-    ax.set_ylim(0, 100)
-    ax.set_yticks([25, 50, 75, 100])
-    ax.set_yticklabels(["25%","50%","75%","100%"], fontsize=6)
-    ax.legend(loc="lower center", bbox_to_anchor=(0.5, -0.18), fontsize=8, ncol=2)
-    ax.set_title("Parameter Comparison", fontweight="bold", pad=15)
-    ax.grid(color="#e0e0e0")
-    fig.tight_layout()
+    keys  = ["ra","fv","el","et","rg"]
+    maxes = [32,25,23,15,5]
+    labels = ["Resource Adequacy","Financial Viability","Ease of Living",
+              "Energy Transition","Regulatory Governance"]
+    fig = go.Figure()
+    for name, v, color in [(sa_name, va, "#1a3a7c"), (sb_name, vb, "#c62828")]:
+        pcts = [v[k] / m * 100 for k, m in zip(keys, maxes)]
+        fig.add_trace(go.Scatterpolar(
+            r=pcts + [pcts[0]], theta=labels + [labels[0]],
+            fill="toself", fillcolor=color, opacity=0.2,
+            line=dict(color=color, width=2), name=name,
+            hovertemplate="<b>%{theta}</b><br>%{r:.1f}%<extra></extra>",
+        ))
+    fig.update_layout(**PLOTLY_LAYOUT,
+        polar=dict(radialaxis=dict(range=[0, 100], tickvals=[25,50,75,100])),
+        title="Parameter Comparison", height=420,
+        legend=dict(orientation="h", yanchor="bottom", y=-0.15),
+    )
     return fig
 
 def chart_scatter(df):
-    fig, ax = plt.subplots(figsize=(8, 5))
-    for grade in "ABCDE":
-        sub = df[df["Grade"]==grade]
-        ax.scatter(sub["Fin. Viability"], sub["Res. Adequacy"],
-                   s=sub["Total"]*3, color=GRADE_COLOR[grade], alpha=0.75,
-                   edgecolors="white", linewidth=0.8, label=f"Grade {grade}", zorder=3)
-    for _, row in df.iterrows():
-        ax.annotate(row["State/UT"], (row["Fin. Viability"], row["Res. Adequacy"]),
-                    fontsize=5.5, ha="center", va="bottom", color="#333")
-    ax.set_xlabel("Financial Viability (out of 25)")
-    ax.set_ylabel("Resource Adequacy (out of 32)")
-    ax.set_title("Resource Adequacy vs Financial Viability\n(bubble size = total score)", fontweight="bold")
-    ax.legend(fontsize=8)
-    ax.grid(color="#f0f0f0", zorder=0)
-    fig.tight_layout()
+    fig = px.scatter(df, x="Fin. Viability", y="Res. Adequacy",
+                     size="Total", color="Grade",
+                     color_discrete_map=GRADE_COLOR,
+                     hover_name="State/UT",
+                     hover_data={"Total": True, "Grade": True},
+                     size_max=40,
+                     title="Resource Adequacy vs Financial Viability (bubble = total score)")
+    fig.update_layout(**PLOTLY_LAYOUT, height=480,
+                      xaxis_title="Financial Viability (out of 25)",
+                      yaxis_title="Resource Adequacy (out of 32)")
     return fig
 
 def chart_type_box(df):
-    fig, ax = plt.subplots(figsize=(5, 3.5))
-    for i, (typ, color) in enumerate([("State","#1a3a7c"),("UT","#c62828")]):
-        vals = df[df["Type"]==typ]["Total"].values
-        bp = ax.boxplot(vals, positions=[i], widths=0.5, patch_artist=True,
-                        boxprops=dict(facecolor=color, alpha=0.4),
-                        medianprops=dict(color=color, linewidth=2),
-                        whiskerprops=dict(color=color), capprops=dict(color=color))
-        ax.scatter(np.random.normal(i, 0.05, len(vals)), vals, color=color, alpha=0.6, s=20, zorder=3)
-    ax.set_xticks([0,1]); ax.set_xticklabels(["States","Union Territories"])
-    ax.set_ylabel("Total Score"); ax.set_title("States vs Union Territories", fontweight="bold")
-    ax.set_ylim(0,105); ax.grid(axis="y", color="#f0f0f0")
-    fig.tight_layout()
+    fig = go.Figure()
+    for typ, color in [("State","#1a3a7c"),("UT","#c62828")]:
+        vals = df[df["Type"]==typ]["Total"].tolist()
+        fig.add_trace(go.Box(y=vals, name=typ, marker_color=color,
+                             boxpoints="all", jitter=0.4, pointpos=0,
+                             hovertemplate="<b>"+typ+"</b><br>Score: %{y}<extra></extra>"))
+    fig.update_layout(**PLOTLY_LAYOUT, title="States vs Union Territories",
+                      yaxis=dict(range=[0,110], title="Total Score"), height=380)
     return fig
 
 def chart_trend(tdf, param):
-    fig, ax = plt.subplots(figsize=(9, 4))
     palette = ["#1a3a7c","#c62828","#2e7d32","#f57c00","#6a1b9a","#00838f","#558b2f","#4e342e"]
+    fig = go.Figure()
     for i, (state, grp) in enumerate(tdf.groupby("State/UT")):
         grp = grp.sort_values("Date")
-        ax.plot(grp["Date"], grp[param], marker="o", linewidth=2.2,
-                color=palette[i % len(palette)], label=state, markersize=6)
-    ax.set_title(f"Trend: {param}", fontweight="bold")
-    ax.set_ylabel(param)
-    ax.legend(fontsize=7, loc="best", ncol=2)
-    ax.grid(color="#f0f0f0")
-    plt.xticks(rotation=20, ha="right", fontsize=8)
-    fig.tight_layout()
+        fig.add_trace(go.Scatter(
+            x=grp["Date"], y=grp[param], mode="lines+markers", name=state,
+            line=dict(color=palette[i % len(palette)], width=2.5), marker=dict(size=8),
+            hovertemplate=f"<b>{state}</b><br>%{{x}}<br>{param}: %{{y}}<extra></extra>",
+        ))
+    fig.update_layout(**PLOTLY_LAYOUT, title=f"Trend: {param}", yaxis_title=param, height=420,
+                      legend=dict(orientation="h", yanchor="bottom", y=-0.3, font=dict(size=10)))
     return fig
 
 def chart_delta(chg_df):
     chg_df = chg_df.sort_values("Δ")
     colors = [GRADE_COLOR["A"] if v >= 0 else GRADE_COLOR["D"] for v in chg_df["Δ"]]
-    fig, ax = plt.subplots(figsize=(10, 4))
-    bars = ax.bar(range(len(chg_df)), chg_df["Δ"], color=colors, edgecolor="white", linewidth=0.5)
-    ax.set_xticks(range(len(chg_df)))
-    ax.set_xticklabels(chg_df["State/UT"], rotation=45, ha="right", fontsize=7)
-    ax.axhline(0, color="#333", linewidth=0.8)
-    ax.set_title("Score Change: First → Latest Assessment", fontweight="bold")
-    ax.set_ylabel("Δ Score")
-    ax.grid(axis="y", color="#f0f0f0")
-    fig.tight_layout()
+    fig = go.Figure(go.Bar(
+        x=chg_df["State/UT"], y=chg_df["Δ"], marker_color=colors,
+        hovertemplate="<b>%{x}</b><br>Δ: %{y}<extra></extra>",
+    ))
+    fig.add_hline(y=0, line_color="#333", line_width=1)
+    fig.update_layout(**PLOTLY_LAYOUT,
+        title="Score Change: First → Latest Assessment",
+        yaxis_title="Δ Score", height=400, xaxis=dict(tickangle=-45),
+    )
     return fig
 
 def chart_compare_bar(sa_name, va, sb_name, vb):
-    keys   = ["ra","fv","el","et","rg"]
-    maxes  = [32,25,23,15,5]
-    labels = ["Res.\nAdequacy","Fin.\nViability","Ease of\nLiving","Energy\nTransition","Reg.\nGovernance"]
-    pa = [va[k]/m*100 for k,m in zip(keys,maxes)]
-    pb = [vb[k]/m*100 for k,m in zip(keys,maxes)]
-    x = np.arange(len(labels)); w = 0.35
-    fig, ax = plt.subplots(figsize=(8, 4))
-    b1 = ax.bar(x - w/2, pa, w, label=sa_name, color="#1a3a7c", alpha=0.85)
-    b2 = ax.bar(x + w/2, pb, w, label=sb_name, color="#c62828", alpha=0.85)
-    for bars in [b1, b2]:
-        for bar in bars:
-            ax.text(bar.get_x()+bar.get_width()/2, bar.get_height()+1,
-                    f"{bar.get_height():.0f}%", ha="center", fontsize=7.5)
-    ax.set_xticks(x); ax.set_xticklabels(labels, fontsize=9)
-    ax.set_ylim(0, 115); ax.set_ylabel("% of Max Marks")
-    ax.set_title("Parameter Comparison (% of Max)", fontweight="bold")
-    ax.legend(); ax.grid(axis="y", color="#f0f0f0")
-    fig.tight_layout()
+    keys  = ["ra","fv","el","et","rg"]
+    maxes = [32,25,23,15,5]
+    labels = ["Res. Adequacy","Fin. Viability","Ease of Living","Energy Transition","Reg. Governance"]
+    pa = [va[k] / m * 100 for k, m in zip(keys, maxes)]
+    pb = [vb[k] / m * 100 for k, m in zip(keys, maxes)]
+    fig = go.Figure()
+    fig.add_trace(go.Bar(name=sa_name, x=labels, y=pa, marker_color="#1a3a7c",
+                         text=[f"{v:.0f}%" for v in pa], textposition="outside"))
+    fig.add_trace(go.Bar(name=sb_name, x=labels, y=pb, marker_color="#c62828",
+                         text=[f"{v:.0f}%" for v in pb], textposition="outside"))
+    fig.update_layout(**PLOTLY_LAYOUT,
+        title="Parameter Comparison (% of Max)", barmode="group",
+        yaxis=dict(range=[0, 125], title="% of Max Marks"), height=420,
+    )
     return fig
 
 # ─── LOAD ─────────────────────────────────────────────────────────────────────
@@ -435,7 +405,8 @@ with st.sidebar:
     sel_date = st.selectbox("📅 Assessment Period", dates,
                             format_func=lambda d: data["assessments"][d]["label"])
     st.markdown("---")
-    st.markdown('<div style="font-size:0.7rem;opacity:0.5;text-align:center">PFI & REC Ltd. | MoP, GoI</div>', unsafe_allow_html=True)
+    st.markdown('<div style="font-size:0.7rem;opacity:0.5;text-align:center">PFI & REC Ltd. | MoP, GoI</div>',
+                unsafe_allow_html=True)
 
 snapshot = data["assessments"][sel_date]
 scores   = snapshot["scores"]
@@ -462,12 +433,12 @@ if page == "📊 Dashboard":
 
     c1,c2,c3,c4,c5,c6 = st.columns(6)
     kpis = [
-        (len(df),            "#0d1b4b",          "States & UTs",  ""),
-        (gc.get("A",0),      GRADE_COLOR["A"],    "Grade A",       "≥ 85 marks"),
-        (gc.get("B",0),      GRADE_COLOR["B"],    "Grade B",       "65–84 marks"),
-        (gc.get("C",0),      GRADE_COLOR["C"],    "Grade C",       "50–64 marks"),
-        (gc.get("D",0)+gc.get("E",0), GRADE_COLOR["D"], "Grade D/E", "< 50 marks"),
-        (f"{avg:.1f}",       "#555",              "National Avg",  "out of 100"),
+        (len(df),            "#0d1b4b",       "States & UTs",  ""),
+        (gc.get("A",0),      GRADE_COLOR["A"],"Grade A",       "≥ 85 marks"),
+        (gc.get("B",0),      GRADE_COLOR["B"],"Grade B",       "65–84 marks"),
+        (gc.get("C",0),      GRADE_COLOR["C"],"Grade C",       "50–64 marks"),
+        (gc.get("D",0)+gc.get("E",0), GRADE_COLOR["D"],"Grade D/E","< 50 marks"),
+        (f"{avg:.1f}",       "#555",          "National Avg",  "out of 100"),
     ]
     for col, (val, color, lbl, sub) in zip([c1,c2,c3,c4,c5,c6], kpis):
         with col:
@@ -478,7 +449,7 @@ if page == "📊 Dashboard":
             </div>""", unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🏆 Rankings", "📊 Charts", "🔬 Deep Dive", "🗺️ Heatmap", "📋 Table"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🏆 Rankings","📊 Charts","🔬 Deep Dive","🗺️ Heatmap","📋 Table"])
 
     with tab1:
         col_f1, col_f2 = st.columns([3,1])
@@ -487,20 +458,20 @@ if page == "📊 Dashboard":
         fdf = df.copy()
         if search: fdf = fdf[fdf["State/UT"].str.contains(search, case=False)]
         if filter_type != "All": fdf = fdf[fdf["Type"]==filter_type]
-        st.pyplot(chart_rankings(fdf.sort_values("Total", ascending=True)), use_container_width=True)
+        st.plotly_chart(chart_rankings(fdf.sort_values("Total", ascending=True)), use_container_width=True)
 
     with tab2:
         r1c1, r1c2 = st.columns(2)
-        with r1c1: st.pyplot(chart_grade_donut(gc), use_container_width=True)
-        with r1c2: st.pyplot(chart_region_bar(df), use_container_width=True)
+        with r1c1: st.plotly_chart(chart_grade_donut(gc), use_container_width=True)
+        with r1c2: st.plotly_chart(chart_region_bar(df), use_container_width=True)
         r2c1, r2c2 = st.columns(2)
-        with r2c1: st.pyplot(chart_type_box(df), use_container_width=True)
+        with r2c1: st.plotly_chart(chart_type_box(df), use_container_width=True)
 
     with tab3:
-        st.pyplot(chart_scatter(df), use_container_width=True)
+        st.plotly_chart(chart_scatter(df), use_container_width=True)
 
     with tab4:
-        st.pyplot(chart_heatmap(df), use_container_width=True)
+        st.plotly_chart(chart_heatmap(df), use_container_width=True)
 
     with tab5:
         disp = df.copy(); disp.insert(0,"Rank",disp.index)
@@ -541,9 +512,8 @@ elif page == "🔍 State Profile":
           <div style="font-size:0.78rem;color:#666">🗺️ {b.get('region','—')} &nbsp;|&nbsp; 🏛️ {b.get('type','—')}</div>
         </div>""", unsafe_allow_html=True)
     with col2:
-        vals  = [ra, fv, el, et, rg]
-        maxes = [32, 25, 23, 15,  5]
-        st.pyplot(chart_radar(sel, vals, maxes, GRADE_COLOR[grade]), use_container_width=True)
+        st.plotly_chart(chart_radar(sel, [ra,fv,el,et,rg], [32,25,23,15,5], GRADE_COLOR[grade]),
+                        use_container_width=True)
 
     st.markdown("#### Parameter Breakdown")
     p1, p2 = st.columns(2)
@@ -565,26 +535,27 @@ elif page == "🔍 State Profile":
         region = b.get("region","")
         peers  = df[df["Region"]==region].sort_values("Total", ascending=False)
         st.markdown(f"#### 🌏 Regional Peers — {region}")
-        fig, ax = plt.subplots(figsize=(8, 3))
-        colors = [GRADE_COLOR[g] for g in peers["Grade"]]
-        bars = ax.bar(peers["State/UT"], peers["Total"], color=colors, edgecolor="white")
-        for bar, val in zip(bars, peers["Total"]):
-            ax.text(bar.get_x()+bar.get_width()/2, val+0.5, f"{val:.1f}", ha="center", fontsize=8)
-        ax.set_ylim(0,110); ax.set_title(f"{region} Region Rankings", fontweight="bold")
-        plt.xticks(rotation=25, ha="right", fontsize=8); ax.grid(axis="y", color="#f0f0f0")
-        fig.tight_layout(); st.pyplot(fig, use_container_width=True)
+        fig = px.bar(peers, x="State/UT", y="Total", color="Grade",
+                     color_discrete_map=GRADE_COLOR, text="Total",
+                     title=f"{region} Region Rankings")
+        fig.update_traces(texttemplate="%{text:.1f}", textposition="outside")
+        fig.update_layout(**PLOTLY_LAYOUT, yaxis=dict(range=[0,110]), height=350,
+                          xaxis=dict(tickangle=-25))
+        st.plotly_chart(fig, use_container_width=True)
 
     history = [{"Assessment": snap["label"], "Score": snap["scores"].get(sel,{}).get("total",0)}
                for d, snap in sorted(data["assessments"].items()) if sel in snap["scores"]]
     if len(history) > 1:
         st.markdown("---")
         hist_df = pd.DataFrame(history)
-        fig, ax = plt.subplots(figsize=(8, 3))
-        ax.plot(hist_df["Assessment"], hist_df["Score"], marker="o", color=GRADE_COLOR[grade],
-                linewidth=2.5, markersize=8)
-        ax.set_ylim(0, 105); ax.set_title(f"Score History — {sel}", fontweight="bold")
-        plt.xticks(rotation=20, ha="right", fontsize=8); ax.grid(color="#f0f0f0")
-        fig.tight_layout(); st.pyplot(fig, use_container_width=True)
+        fig = go.Figure(go.Scatter(
+            x=hist_df["Assessment"], y=hist_df["Score"], mode="lines+markers",
+            line=dict(color=GRADE_COLOR[grade], width=2.5), marker=dict(size=10),
+            hovertemplate="%{x}<br>Score: %{y}<extra></extra>",
+        ))
+        fig.update_layout(**PLOTLY_LAYOUT, title=f"Score History — {sel}",
+                          yaxis=dict(range=[0,105]), height=320, xaxis=dict(tickangle=-20))
+        st.plotly_chart(fig, use_container_width=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TRENDS
@@ -612,7 +583,7 @@ elif page == "📈 Trends":
                                  "Reg. Governance":gv(sc,"rg","regulatory_governance")})
         if rows:
             tdf = pd.DataFrame(rows)
-            st.pyplot(chart_trend(tdf, param), use_container_width=True)
+            st.plotly_chart(chart_trend(tdf, param), use_container_width=True)
             all_d = sorted(data["assessments"].keys())
             if len(all_d) >= 2:
                 chg = []
@@ -627,7 +598,7 @@ elif page == "📈 Trends":
                                     "Δ":delta,
                                     "Direction":"▲ Improved" if delta>0 else("▼ Declined" if delta<0 else "→ Same")})
                 chg_df = pd.DataFrame(chg).sort_values("Δ", ascending=False)
-                st.pyplot(chart_delta(chg_df), use_container_width=True)
+                st.plotly_chart(chart_delta(chg_df), use_container_width=True)
                 st.dataframe(chg_df, use_container_width=True, hide_index=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -661,7 +632,7 @@ elif page == "⚖️ Compare":
                 </div>""", unsafe_allow_html=True)
 
         r1, r2 = st.columns([3,2])
-        with r1: st.pyplot(chart_compare_radar(sa_name, va, sb_name, vb), use_container_width=True)
+        with r1: st.plotly_chart(chart_compare_radar(sa_name, va, sb_name, vb), use_container_width=True)
         with r2:
             cmp_rows = []
             for label, key, mx in [("Resource Adequacy","ra",32),("Financial Viability","fv",25),
@@ -671,7 +642,7 @@ elif page == "⚖️ Compare":
                 win = f"✅ {sa_name}" if av>bv else (f"✅ {sb_name}" if bv>av else "Tied")
                 cmp_rows.append({"Parameter":label, sa_name:f"{av}/{mx}", sb_name:f"{bv}/{mx}", "Better":win})
             st.dataframe(pd.DataFrame(cmp_rows), use_container_width=True, hide_index=True)
-        st.pyplot(chart_compare_bar(sa_name, va, sb_name, vb), use_container_width=True)
+        st.plotly_chart(chart_compare_bar(sa_name, va, sb_name, vb), use_container_width=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # UPLOAD FILE
@@ -682,13 +653,10 @@ elif page == "📤 Upload File":
       Required columns: <b>State/UT</b>, <b>Resource Adequacy</b>, <b>Financial Viability</b>,
       <b>Ease of Living</b>, <b>Energy Transition</b>, <b>Regulatory Governance</b>
     </div>""", unsafe_allow_html=True)
-
     st.download_button("⬇️ Download CSV Template", make_csv_template(),
-                       "assessment_template.csv", mime="text/csv", use_container_width=False)
-
+                       "assessment_template.csv", mime="text/csv")
     st.markdown("---")
-    uploaded = st.file_uploader("📂 Upload CSV (or Excel if openpyxl is installed)",
-                                type=["csv","xlsx","xls"])
+    uploaded = st.file_uploader("📂 Upload CSV", type=["csv","xlsx","xls"])
     if uploaded:
         parsed = parse_excel_csv(uploaded)
         if parsed is None:
@@ -701,12 +669,10 @@ elif page == "📤 Upload File":
             prev_df = pd.DataFrame(prev_rows).sort_values("Total", ascending=False)
             st.dataframe(prev_df.style.background_gradient(subset=["Total"], cmap="RdYlGn", vmin=0, vmax=100),
                          use_container_width=True, height=300)
-
             c1, c2 = st.columns(2)
             up_date  = c1.date_input("Assessment Date", value=date.today())
             up_label = c2.text_input("Assessment Label", placeholder="e.g. ARR FY 2026-27")
             up_notes = st.text_area("Notes", placeholder="Source, methodology...")
-
             if st.button("💾 Save Assessment", type="primary", use_container_width=True):
                 if not up_label.strip():
                     st.error("Please provide a label.")
