@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches  # ← add this line
+import matplotlib.patches as mpatches  # ← FIXED: was missing, caused NameError in chart_rankings
 import numpy as np
 import json
 import os
