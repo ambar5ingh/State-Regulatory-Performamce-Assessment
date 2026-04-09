@@ -972,8 +972,9 @@ elif page == "⚖️ Compare":
                               "border:1px solid #a5d6a7;border-radius:10px;padding:2px 10px;"
                               "display:inline-block;margin-bottom:6px'>Winner</div>"
                               if wins else "")
+                border_color = color if wins else "#e2e8f0"
                 st.markdown(
-                    f"<div class='cmp-card' style='border-color:{color if wins else \"#e2e8f0\"};'>"
+                    f"<div class='cmp-card' style='border-color:{border_color};'>"
                     f"{winner_tag}"
                     f"<div style='font-family:\"Playfair Display\",serif;font-size:1.1rem;"
                     f"font-weight:700;color:#1a1a2e;margin-bottom:8px'>{name}</div>"
