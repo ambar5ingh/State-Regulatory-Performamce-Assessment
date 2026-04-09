@@ -760,6 +760,7 @@ if page == "📊 Overview":
     st.markdown("<div class='section-title'>Top 5 Performers</div>", unsafe_allow_html=True)
     for _, row in top5.iterrows():
         pct = row["Total"]
+        gc_color = grade_color(row["Grade"])
         st.markdown(
             f"<div class='rank-item'>"
             f"<span class='rank-num'>#{row.name}</span>"
@@ -767,8 +768,8 @@ if page == "📊 Overview":
             f"<div style='flex:1'><div class='rank-name'>{row['State/UT']}</div>"
             f"<div class='rank-meta'>{row['Region']} · {row['Type']}</div></div>"
             f"<div style='display:flex;align-items:center;gap:8px;min-width:160px'>"
-            f"{score_bar_html(pct, grade_color(row['Grade']))}"
-            f"<span style='font-size:0.82rem;font-weight:600;color:{grade_color(row[\Grade\"])};min-width:36px'>{pct:.1f}</span>"
+            f"{score_bar_html(pct, gc_color)}"
+            f"<span style='font-size:0.82rem;font-weight:600;color:{gc_color};min-width:36px'>{pct:.1f}</span>"
             f"</div></div>", unsafe_allow_html=True)
 
     st.markdown("<br><div class='section-title'>Bottom 5 Performers</div>", unsafe_allow_html=True)
