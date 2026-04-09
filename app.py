@@ -901,16 +901,17 @@ elif page == "🔍 State Profile":
             peers  = df[df["Region"] == region].sort_values("Total", ascending=False)
             st.markdown(f"<div class='section-title'>Regional Peers — {region}</div>", unsafe_allow_html=True)
             for _, row in peers.iterrows():
-                is_sel = row["State/UT"] == sel
-                bg = "#eff6ff" if is_sel else "transparent"
-                st.markdown(
-                    f"<div class='rank-item' style='background:{bg};border-radius:8px'>"
-                    f"<span class='rank-num'>#{row.name}</span>"
-                    f"{badge_html(row['Grade'])}"
-                    f"<div class='rank-name' style='font-weight:{600 if is_sel else 400}'>"
-                    f"{row['State/UT']}</div>"
-                    f"<span style='font-size:0.8rem;font-weight:600;color:{grade_color(row[\"Grade\"])}'>"
-                    f"{row['Total']:.1f}</span></div>", unsafe_allow_html=True)
+                    is_sel = row["State/UT"] == sel
+                    bg = "#eff6ff" if is_sel else "transparent"
+                    peer_color = grade_color(row["Grade"])
+                    st.markdown(
+                        f"<div class='rank-item' style='background:{bg};border-radius:8px'>"
+                        f"<span class='rank-num'>#{row.name}</span>"
+                        f"{badge_html(row['Grade'])}"
+                        f"<div class='rank-name' style='font-weight:{600 if is_sel else 400}'>"
+                        f"{row['State/UT']}</div>"
+                        f"<span style='font-size:0.8rem;font-weight:600;color:{peer_color}'>"
+                        f"{row['Total']:.1f}</span></div>", unsafe_allow_html=True)
 
         history = [
             {"Assessment": snap["label"], "Score": snap["scores"].get(sel, {}).get("total", 0)}
