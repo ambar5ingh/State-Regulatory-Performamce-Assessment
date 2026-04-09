@@ -775,15 +775,15 @@ if page == "📊 Overview":
     st.markdown("<br><div class='section-title'>Bottom 5 Performers</div>", unsafe_allow_html=True)
     for _, row in bot5.iterrows():
         pct = row["Total"]
+        gc_color = grade_color(row["Grade"])
         st.markdown(
             f"<div class='rank-item'>"
             f"<span class='rank-num'>#{row.name}</span>"
             f"{badge_html(row['Grade'])}"
             f"<div style='flex:1'><div class='rank-name'>{row['State/UT']}</div>"
             f"<div class='rank-meta'>{row['Region']} · {row['Type']}</div></div>"
-            f"<span style='font-size:0.82rem;font-weight:600;color:{grade_color(row[\"Grade\"])}'>{pct:.1f}</span>"
+            f"<span style='font-size:0.82rem;font-weight:600;color:{gc_color}'>{pct:.1f}</span>"
             f"</div>", unsafe_allow_html=True)
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  RANKINGS
